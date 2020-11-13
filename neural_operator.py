@@ -259,8 +259,8 @@ if __name__ == '__main__':
 
     predictions = my_model.test_model(test_data_ip,test_data_op)
 
-    plt.figure()
-    plt.plot(test_data_op[4,:],label='True')
-    plt.plot(predictions[4,:],label='Predicted')
-    plt.legend()
-    plt.show()
+    # plt.figure()
+    # plt.plot(test_data_op[4,:],label='True')
+    # plt.plot(predictions[4,:],label='Predicted')
+    # plt.legend()
+    # plt.show()
