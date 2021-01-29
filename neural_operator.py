@@ -25,15 +25,22 @@ class operator_layer(Layer):
             self.lifted_dimension = input_shape[1] # samples x lifted_dimension
 
             # Add the affine transform weight
-            # self.w_list = []
-            # for i in range(self.num_iterations):
-            #     self.w_list.append(self.add_weight(shape=(self.lifted_dimension,self.lifted_dimension),initializer='xavier',trainable=True,name='w'))
+            self.w_list = []
+            self.b_list = []
+            for i in range(self.num_iterations):
+                self.w_list.append(self.add_weight(shape=(self.lifted_dimension,self.lifted_dimension),initializer='xavier',trainable=True,name='w_'+str(i)))
+                self.b_list.append(self.add_weight(shape=(self.lifted_dimension,),initializer='xavier',trainable=True,name='b_'+str(i)))
 
-            self.w = self.add_weight(shape=(self.lifted_dimension,self.lifted_dimension),initializer='xavier',trainable=True,name='w')
-            self.b = self.add_weight(shape=(self.lifted_dimension,),initializer='xavier',trainable=True,name='w')
+            # Add the Fourier transform weight
+            self.r_phi_list = []
+            for i in range(self.num_iterations):
+                self.r_phi_list.append(shape=(self.lifted_dimension,self.lifted_dimension),initializer='xavier',trainable=True,name='r_phi_'+str(i))
 
-            # Define the Fourier space weight
-            self.r_phi = self.add_weight(shape=(self.lifted_dimension,self.lifted_dimension),initializer='xavier',trainable=True,name='r_phi')
+            # self.w = self.add_weight(shape=(self.lifted_dimension,self.lifted_dimension),initializer='xavier',trainable=True,name='w')
+            # self.b = self.add_weight(shape=(self.lifted_dimension,),initializer='xavier',trainable=True,name='w')
+
+            # # Define the Fourier space weight
+            # self.r_phi = self.add_weight(shape=(self.lifted_dimension,self.lifted_dimension),initializer='xavier',trainable=True,name='r_phi')
 
             # # Add the regular global kernel
             # self.kw = self.add_weight(shape=(self.samples,self.samples),initializer='xavier',trainable=True,name='kw')
@@ -49,10 +56,10 @@ class operator_layer(Layer):
                 # temp = tf.nn.swish(tf.matmul(self.kw,result)+self.kb)
 
                 # Fourier kernel
+                temp = tf.transpose(tf.identity(result)) # lifted_dimension x samples
                 for dim in range(self.lifted_dimension):
-                    temp = tf.transpose(tf.identity(result)) # lifted_dimension x samples
                     # Fourier kernel
-                    temp[dim:dim+1,:] = tf.matmul(tf.signal.fft(self.r_phi),tf.signal.fft(temp[dim:dim+1,:]))
+                    temp[dim:dim+1,:] = tf.matmul(tf.signal.fft(self.r_phi_list[iteration]),tf.signal.fft(temp[dim:dim+1,:]))
 
                 # # Linear operation (of periodic function) in Fourier space
                 # temp = tf.matmul(tf.signal.fft(self.r_phi),temp)
@@ -64,7 +71,8 @@ class operator_layer(Layer):
                 # Local operations
                 temp = tf.transpose(temp)
                 for sample in range(self.samples):
-                    result[sample] = tf.nn.swish(temp[sample]+tf.matmul(result[sample:sample+1,:],self.w)+self.b)
+                    result[sample] = tf.nn.relu(
+                        temp[sample]+tf.matmul(result[sample:sample+1,:],self.w_list[iteration])+self.b_list[iteration])
 
                 # Normalization
                 result[sample] = result[sample]/tf.math.reduce_sum(result)
@@ -85,15 +93,14 @@ class neural_operator(Model):
         self.num_fields = np.shape(ip_data)[0]
 
         # Define lifting operator
-        self.lifting_layer_0 = tf.keras.layers.Dense(100,activation='swish') # Lift to high dimensional space 'v'
-        self.lifting_layer_1 = tf.keras.layers.Dense(100,activation='linear') # Lift to high dimensional space 'v'
+        self.lifting_layer_0 = tf.keras.layers.Dense(10,activation='swish') # Lift to high dimensional space 'v'
 
         # Iterative update layer
         num_iterations = 10
         self.operator_layer = operator_layer(num_iterations)
 
         # Define projection operator
-        self.projection_layer_0 = tf.keras.layers.Dense(100,activation='swish')
+        self.projection_layer_0 = tf.keras.layers.Dense(10,activation='swish')
         self.projection_layer_1 = tf.keras.layers.Dense(1,activation='linear')
 
         # Train operation
@@ -102,7 +109,6 @@ class neural_operator(Model):
     # Running the model - applied to every point in domain
     def call(self,X):
         hh = self.lifting_layer_0(X)
-        hh = self.lifting_layer_1(hh)
 
         hh = self.operator_layer(hh)
 
@@ -178,7 +184,7 @@ class neural_operator(Model):
         input_field = test_data_ip[0:1,:].reshape(-1,1)
 
         predictions = []
-        for sample in range(num_test_fields):
+        for sample in range(num_test_fields-1):
                 output_field = self.call(input_field).numpy()
 
                 plt.figure()
@@ -193,7 +199,7 @@ class neural_operator(Model):
                 # Get prediction
                 predictions.append(output_field[:,0])
                 # input_field = output_field.copy()
-                input_field = test_data_op[sample,:].reshape(-1,1)
+                input_field = test_data_ip[sample+1,:].reshape(-1,1)
 
         return np.asarray(predictions)
 
@@ -246,13 +252,12 @@ if __name__ == '__main__':
 
     # np.save('Test_data_ip.npy',test_data_ip)
     # np.save('Test_data_op.npy',test_data_op)
-
     
-    train_data_ip = np.load('Train_data_ip.npy')[:100:10]
-    train_data_op = np.load('Train_data_op.npy')[:100:10]
+    train_data_ip = np.load('Train_data_ip.npy')[:100:5]
+    train_data_op = np.load('Train_data_op.npy')[:100:5]
 
-    test_data_ip = np.load('Train_data_ip.npy')[:100:10]
-    test_data_op = np.load('Train_data_op.npy')[:100:10]
+    test_data_ip = np.load('Train_data_ip.npy')[:100:5]
+    test_data_op = np.load('Train_data_op.npy')[:100:5]
 
     my_model = neural_operator(train_data_ip,train_data_op)
     # my_model.train_model()
